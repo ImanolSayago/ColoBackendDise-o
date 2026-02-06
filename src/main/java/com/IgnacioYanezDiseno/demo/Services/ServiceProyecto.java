@@ -118,40 +118,53 @@ public class ServiceProyecto implements IServiceProyecto {
     public boolean editProyecto(Long id, String titulo, String descripcion, List<MultipartFile> archivos, List<String> imagenesExistentesUrls) {
         try {
             Optional<Proyecto> proyectoOptional = repoproyecto.findById(id);
-            if (!proyectoOptional.isPresent()) {
-                return false;
-            }
+            if (!proyectoOptional.isPresent()) return false;
 
             Proyecto proyecto = proyectoOptional.get();
             proyecto.setTitulo(titulo);
             proyecto.setDescripcion(descripcion);
+
+            // --- LÓGICA PARA LA IMAGEN PRINCIPAL ---
+            // La primera imagen de la lista unificada que viene del front DEBE ser la principal
+            if (imagenesExistentesUrls != null && !imagenesExistentesUrls.isEmpty()) {
+                // Caso A: El usuario mantuvo una imagen que ya existía como portada
+                proyecto.setImagenPrincipal(imagenesExistentesUrls.get(0));
+                // La quitamos de la lista de "adicionales" para que no se duplique abajo
+                imagenesExistentesUrls.remove(0);
+            }
+            else if (archivos != null && !archivos.isEmpty()) {
+                // Caso B: El usuario borró todo y subió fotos nuevas, la primera es la portada
+                String urlNuevaPrincipal = cloudserv.subirImagen(archivos.get(0));
+                proyecto.setImagenPrincipal(urlNuevaPrincipal);
+                archivos.remove(0);
+            }
+
             repoproyecto.save(proyecto);
 
-            // Eliminar imágenes existentes que no están en la lista actualizada
-
-            List<ImagenProyecto> imagenesExistentes = repoImagenProyecto.findByProyectoId(id);
-            for (ImagenProyecto imagen : imagenesExistentes) {
-                if (!imagenesExistentesUrls.contains(imagen.getUrl())) {
-                    cloudserv.eliminarImagen(imagen.getUrl()); // Elimina la imagen de Cloudinary
-                    repoImagenProyecto.delete(imagen); // Elimina la imagen de la base de datos
-
+            // --- LÓGICA PARA IMÁGENES ADICIONALES (El resto) ---
+            // 1. Limpiar las que ya no están
+            List<ImagenProyecto> imagenesAdicionalesDB = repoImagenProyecto.findByProyectoId(id);
+            for (ImagenProyecto img : imagenesAdicionalesDB) {
+                if (!imagenesExistentesUrls.contains(img.getUrl())) {
+                    // Si la URL no está en las "adicionales" que quedaron, se borra
+                    // cloudserv.eliminarImagen(img.getUrl()); // Opcional según tu política de borrado
+                    repoImagenProyecto.delete(img);
                 }
             }
 
-            // Subir nuevas imágenes y guardarlas en la base de datos
-            if (archivos != null && !archivos.isEmpty()) {
+            // 2. Guardar las nuevas adicionales
+            if (archivos != null) {
                 for (MultipartFile archivo : archivos) {
                     String url = cloudserv.subirImagen(archivo);
-                    ImagenProyecto nuevaImagen = new ImagenProyecto();
-                    nuevaImagen.setUrl(url);
-                    nuevaImagen.setProyecto(proyecto);
-                    repoImagenProyecto.save(nuevaImagen);
-
+                    ImagenProyecto nueva = new ImagenProyecto();
+                    nueva.setUrl(url);
+                    nueva.setProyecto(proyecto);
+                    repoImagenProyecto.save(nueva);
                 }
             }
+
             return true;
         } catch (Exception e) {
-
             return false;
         }
     }
